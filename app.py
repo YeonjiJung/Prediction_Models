@@ -1,269 +1,359 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Thu Oct 17 00:16:37 2019
-
-@author: xavierochoa
+@author: Yeonji
 """
 
 import dash
+
 import dash_core_components as dcc
+
 import dash_daq as daq
+
 import dash_html_components as html
-import dash_bootstrap_components as dbc
-from dash.dependencies import Input, Output, ClientsideFunction
+
+from dash.dependencies import Input, Output
+
+ 
 
 import pandas as pd
-import numpy
-from sklearn import cluster
-from sklearn.metrics import brier_score_loss
-from sklearn.calibration import calibration_curve
+
+import numpy as np
+
 import matplotlib.pyplot as plt
-import pickle
 
-app = dash.Dash(
-    __name__,
-    external_stylesheets=[dbc.themes.BOOTSTRAP]
-)
+ 
 
-server = app.server
-app.config.suppress_callback_exceptions = False
+df = pd.read_csv("clean_data.csv")
 
-students = pd.read_csv("students.csv")
-semesters = pd.read_csv("semesters.csv")
-students_train = pd.read_csv("students_train.csv")
-semesters_train = pd.read_csv("semesters_train.csv")
-clus_students = pickle.load(open("student_model.sav", 'rb'))
-clus_semesters = pickle.load(open("semester_model.sav", 'rb'))
-rf_model=pickle.load(open("rf_model.sav",'rb'))
+X = df[df.columns.difference(['FinalGrade])]
+Y = df['FinalGrade']
 
-semesters_test=semesters[semesters['year'] > 2011]
-students_test=students[students['student_id'].isin(semesters_test['student_id'].tolist())]
+ 
+
+from sklearn.model_selection import train_test_split
+
+from sklearn.linear_model import LinearRegression
+
+ 
+
+X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2)
+
+ 
+
+regressor = LinearRegression() 
+
+regressor.fit(X_train, Y_train)
+
+ 
+
+ 
+
+ 
+
+external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+
+ 
+
+app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+
+server=app.server
+
+ 
+
+app.layout = html.Div([
+
+       
+
+    html.H1('Student Performance Predictor'),
+
+       
+
+    html.Div([  
+
+    html.Label('Travel Time (Home to School) Score'),
+
+    dcc.Slider(id='traveltime-slider',
+
+            min=0, max=4, step=1, value=3,
+
+               marks={
+                
+        1: {'label': '1 ( <15 min)'},
+
+        2: {'label': '2 (15 to 30 min)'},
+
+        3: {'label': '3 (30 min to 1 hour)'},
+
+        4: {'label': '4 ( > 1 hour)'},                        
+
+    }),
+
+ 
+
+html.Br(),
+
+    html.Label('Weekly Study Time Score'),
+
+    dcc.Slider(id='studytime-slider',
+
+            min=0, max=4, step=1, value=3,
+
+               marks={
+                
+        1: {'label': '1 ( <2 hours)'},
+
+        2: {'label': '2 (2 to 5 hours)'},
+
+        3: {'label': '3 (5 to 10 hours)'},
+
+        4: {'label': '4 ( > 10 hours)'},                        
+
+    }),
+
+ 
+
+html.Br(),
+
+    html.Label('Past Failure Experiences'),
+
+    dcc.Slider(id='failures-slider',
+
+            min=0, max=3, step=1, value=2,
+
+               marks={
+                
+        0: {'label': '0'},
+
+        1: {'label': '1'},
+
+        2: {'label': '2'},
+
+        3: {'label': '3'},                        
+
+    }),
 
 
-def get_student_data(student_id):
-    student_data=students_test[students_test['student_id']==student_id]
-    print(student_data)
-    factor1=student_data['factor1'].values[0]
-    factor2=student_data['factor2'].values[0]
-    factor3=student_data['factor3'].values[0]
-    factor4=student_data['factor4'].values[0]
-    factor5=student_data['factor5'].values[0]
-    gpa=student_data['gpa'].values[0]
-    return factor1,factor2,factor3,factor4,factor5,gpa
+ 
 
-def get_semester_data(student_id):
-    semester_data=semesters_test[semesters_test['student_id']==student_id]
-    order=semester_data['order'].values[0]
-    beta_total=semester_data['beta_total'].values[0]
-    num_classes=semester_data['num_classes'].values[0]
-    return order,beta_total,num_classes
+html.Br(),
 
-def get_new_risk_and_uncertainty(factor1,factor2,factor3,factor4,factor5,gpa,order, beta_total,num_classes):
-    columns_student=["factor1","factor2","factor3","factor4","factor5","gpa"]
-    columns_semester=['order', 'beta_total','num_classes']
-    student_data = pd.DataFrame([[factor1,factor2,factor3,factor4,factor5,gpa]], columns=columns_student)
-    semester_data = pd.DataFrame([[order,beta_total,num_classes]], columns=columns_semester)
-    student_cluster=clus_students.predict(student_data)[0]
-    semester_cluster=clus_semesters.predict(semester_data)[0]
-    
-    similar_students=students_train[students_train["cluster"]==student_cluster]
-    similar_students_ids=similar_students["student_id"].tolist()
-    
-    selected_semesters=semesters_train[semesters_train["student_id"].isin(similar_students_ids)]
-    selected_semesters=selected_semesters[selected_semesters['cluster']==semester_cluster]
-    
-    total_cases=len(selected_semesters)
-    failed_cases=len(selected_semesters[selected_semesters['fail']==True])
-    risk=failed_cases/total_cases
-    return risk,total_cases
+    html.Label('Quality of Family Relationship (from 1: very bad to 5: excellent),
 
-def get_forest_risk_and_uncertainty(factor1,factor2,factor3,factor4,factor5,gpa,order, beta_total,num_classes):
-    df = pd.DataFrame([[factor1,factor2,factor3,factor4,factor5,gpa,order, beta_total,num_classes]], columns=['factor1','factor2','factor3','factor4','factor5','gpa','order','beta_total','num_classes'])
-    prediction=rf_model.predict(df)[0]
-    risk=0
-    if (prediction):
-        risk=1
-    certainty=0.7355
-    return risk,certainty
-    
-opt_st=[]
-for student in students_test['student_id'].values:
-    opt_st.append({'label': student, 'value': student})
+    dcc.Slider(id='famrel-slider',
 
-navbar = dbc.Navbar(
-    children=[
-        html.A(
-            # Use row and col to control vertical alignment of logo / brand
-            dbc.Row(
-                [
-                    dbc.Col(
-                        dbc.NavbarBrand("Predictor Dashboard", className="ml-2")
-                    ),
-                ],
-                align="center",
-                no_gutters=True,
-            ),
-        )
-    ],
-    color="dark",
-    dark=True,
-    sticky="top",
-)
+            min=1, max=5, step=1, value=2,
 
-body = dbc.Container(
-    [
-        dbc.Row(
-            [
-                dbc.Col(
-                    [
-                        html.H2("Select Student"),
-                        dcc.Dropdown(
-                           id='student',
-                           options=opt_st,
-                           value=opt_st[0]['value'],
-                           ),
-                        html.Br(),
-                        html.H2("Select Model"),
-                        dcc.Dropdown(
-                           id='model',
-                           options=[{'label': 'Cluster', 'value': 1},{'label': 'Random Forest', 'value': 2}],
-                           value=1,
-                           ),
-                       
-                    ],
-                    width=3,
-                ),
-                dbc.Col(
-                    [
-                        html.H2("Student Data"),
-                        html.H3("GPA"),
-                        daq.GraduatedBar(id='student_gpa',
-                                         color={"gradient":True,"ranges":{"red":[0,6],"yellow":[6,8],"green":[8,10]}},
-                                         showCurrentValue=True,
-                                         value=10
-                                         ),
-                        html.Br(),
-                        html.H3("Factors"),
-                        dcc.Graph(id='student_graph'),
-                        html.H2("Semester Data"),
-                        dbc.Container([dbc.Row([
-                                dbc.Col([
-                                        daq.LEDDisplay(id="order",
-                                                       label="Semester Order",
-                                                       value="0",
-                                                       size=64,
-                                                       color="#FF5E5E"
-                                                       ),
-                                          ]),
-                                dbc.Col([
-                                        daq.LEDDisplay(id="beta",
-                                                       label="Total Beta",
-                                                       value="0",
-                                                       size=64,
-                                                       color="#FF5E5E"
-                                                       ),
-                                          ]),
-                                dbc.Col([
-                                        daq.LEDDisplay(id="classes",
-                                                       label="Number of Classes",
-                                                       value="0",
-                                                       size=64,
-                                                       color="#FF5E5E"
-                                                       ),
-                                           ]),
-                                ])]),
-                        html.Br(),
-                        html.H2("Prediction"),
-                        dbc.Container([dbc.Row([
-                                dbc.Col([
-                                        daq.Gauge(id='risk-gauge',
-                                                  showCurrentValue=True,
-                                                  color={"gradient":True,"ranges":{"red":[0,0.4],"yellow":[0.4,0.7],"green":[0.7,1]}},
-                                                  label="Risk",
-                                                  max=1,
-                                                  min=0,
-                                                  value=1
-                                                  ),
-                                        ]),
-                                dbc.Col([
-                                        daq.Gauge(id='certainty-gauge',
-                                                  showCurrentValue=True,
-                                                  color={"gradient":True,"ranges":{"red":[0,200],"yellow":[200,500],"green":[500,1000]}},
-                                                  label="Certainty",
-                                                  max=1000,
-                                                  min=0,
-                                                  value=1
-                                                  ),
-                                        ]),
-                             ])]),
-                    ],
-                ),
-            ]
-        )
-    ],
-    className="mt-4",
-)
+               marks={
+                
+        1: {'label': '1'},
 
-app.layout = html.Div(children=[navbar,body]
-)
+        2: {'label': '2'},
 
+        3: {'label': '3'},
+
+        4: {'label': '4'},    
+
+        5: {'label': '5'}                    
+
+    }),
+
+
+html.Br(),
+
+    html.Label('Free Time After School (from 1: very low to 5: very high),
+
+    dcc.Slider(id='freetime-slider',
+
+            min=1, max=5, step=1, value=2,
+
+               marks={
+                
+        1: {'label': '1'},
+
+        2: {'label': '2'},
+
+        3: {'label': '3'},
+
+        4: {'label': '4'},    
+
+        5: {'label': '5'}                    
+
+    }),
+
+ html.Br(),
+
+    html.Label('Going out With Friends Extent (from 1: very low to 5: very high),
+
+    dcc.Slider(id='goout-slider',
+
+            min=1, max=5, step=1, value=2,
+
+               marks={
+                
+        1: {'label': '1'},
+
+        2: {'label': '2'},
+
+        3: {'label': '3'},
+
+        4: {'label': '4'},    
+
+        5: {'label': '5'}                    
+
+    }),
+
+ html.Br(),
+
+    html.Label('Health Status Score (from 1: very bad to 5: very good),
+
+    dcc.Slider(id='health-slider',
+
+            min=1, max=5, step=1, value=2,
+
+               marks={
+                
+        1: {'label': '1'},
+
+        2: {'label': '2'},
+
+        3: {'label': '3'},
+
+        4: {'label': '4'},    
+
+        5: {'label': '5'}                    
+
+    }),
+
+
+html.Br(),
+
+html.Label('First Period Grade'),
+
+dcc.Slider(id='FirstPeriodGrade-slider',
+
+            min=0, max=20, step=1, value=10,
+
+               marks={
+                
+        0: {'label': '0'},
+
+        5: {'label': '5'},
+
+        10: {'label': '10'},
+
+        15: {'label': '15'},
+
+        20: {'label': '20'}                            
+
+    }),
+
+ 
+
+html.Br(),
+
+html.Label('Second Period Grade'),
+
+dcc.Slider(id='SecondPeriodGrade-slider',
+
+            min=0, max=20, step=1, value=10,
+
+               marks={
+                
+        0: {'label': '0'},
+
+        5: {'label': '5'},
+
+        10: {'label': '10'},
+
+        15: {'label': '15'},
+
+        20: {'label': '20'}                            
+
+    }),
+
+
+
+],className="pretty_container four columns"),
+
+ 
+
+  html.Div([
+
+ 
+
+    daq.Gauge(
+
+        id='FinalGrade-gauge',
+
+        showCurrentValue=True,
+
+        color={"gradient":True,"ranges":{"red":[0,5],"yellow":[5,15],"green":[15,20]}},
+
+        label="Final Grade",
+
+        max=20,
+
+        min=0,
+
+        value=10
+
+    ),
+
+])
+
+    ])
+
+ 
+
+ 
 
 @app.callback(
-    [Output("student_graph", "figure"),
-     Output("student_gpa", "value"),
-     Output("order", "value"),
-     Output("beta", "value"),
-     Output("classes", "value"),
-     Output("risk-gauge", "value"),
-     Output("certainty-gauge", "value")],
-    [Input("student", "value"),
-     Input("model", "value")],
-)
-def update_plots(student_value,model_value):
-    factor1,factor2,factor3,factor4,factor5,gpa=get_student_data(student_value)
-    order,beta_total,num_classes=get_semester_data(student_value)
-    
-    if(model_value==1):
-        risk,certainty=get_new_risk_and_uncertainty(factor1,factor2,factor3,factor4,factor5,gpa,order,beta_total,num_classes)
-    else:
-        risk,certainty=get_forest_risk_and_uncertainty(factor1,factor2,factor3,factor4,factor5,gpa,order,beta_total,num_classes)
-        
-    data_semester = [
-        {
-            "x": ['Factor 1','Factor 2', 'Factor 3', 'Factor 4', 'Factor 5', 'GPA'],
-            "y": [factor1,factor2,factor3,factor4,factor5,gpa],
-            #"y": [10,5,8,4,3,2],
-            "text": ['Factor 1','Factor 2', 'Factor 3', 'Factor 4', 'Factor 5', 'GPA'],
-            "type": "bar",
-            "name": student_value,
-        }
-    ]
-    layout_semester = {
-        "autosize": True,
-        "xaxis": {"showticklabels": True},
-    }
-    
-    data_student = [{
-            "type": 'scatterpolar',
-            "r": [factor1, factor2, factor3, factor4, factor5, factor1],
-            "theta": ['Factor 1','Factor 2','Factor 3', 'Factor 4', 'Factor 5', 'Factor 1'],
-            "fill": 'toself'
-            }]
 
-    layout_student = {
-            "polar": {
-                    "radialaxis": {
-                            "visible": True,
-                            "range": [0, 10]
-                            }
-            },
-            "showlegend": False
-            }
+    Output('FinalGrade-gauge', 'value'),
 
-    return {"data": data_student, "layout": layout_student},gpa,order,round(beta_total,2),num_classes,risk,certainty
+    [Input('traveltime-slider', 'value'),
+
+     Input('studytime-slider', 'value'),
+
+     Input('failures-slider', 'value'),
+
+     Input('famrel-slider', 'value'),
+
+     Input('freetime-slider', 'value'),
+
+     Input('health-slider', 'value'),
+
+     Input('FirstPeriodGrade-slider', 'value'),
+
+     Input('SecondPeriodGrade-slider', 'value')
+
+     ])
+
+def update_output_div(traveltime,
+                      studytime,
+                      failures,
+                      famrel,
+                      freetime,
+                      goout,
+                      health,
+                      FirstPeriodGrade,
+                      SecondPeriodGrade):
+
+   X_case = pd.DataFrame({'traveltime':[traveltime],'studytime':[studytime],
+                          'failures':[failures],'famrel':[famrel],'freetime':[freetime],
+                          'goout':[goout],'health':[health],
+                          'FirstPeriodGrade':[FirstPeriodGrade],'SecondPeriodGrade':[SecondPeriodGrade],})
+
+   Y_case = regressor.predict(X_case)
 
 
-# Run the server
-if __name__ == "__main__":
-    app.run_server(debug=True)
+   return Y_case[0]
+
+ 
+
+ 
+
+if __name__ == '__main__':
+
+    app.run_server()
